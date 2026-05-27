@@ -1,5 +1,5 @@
-*.exe
 *.ppm
 ppm/
 exes/.DS_Store
 .DS_Store
+.vscode/

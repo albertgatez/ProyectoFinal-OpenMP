@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  mandelbrot_pipeline.cpp  —  Programa secuencial en C++
+ * mandelbrot_pipeline.cpp  —  Programa paralelo en C++ (Línea Base)
  * ============================================================
  *  Tarea A: Genera una imagen 8K (7680 × 4320) del Conjunto
  *           de Mandelbrot con coloración suavizada (smooth
@@ -17,11 +17,11 @@
  *    mandelbrot_blurred.ppm     ← Gaussiano aplicado (Tarea B-1)
  *    mandelbrot_sobel.ppm       ← Sobel aplicado (Tarea B-2)
  *
- *  Compilación:
- *    g++ -O2 -std=c++17 -o mandelbrot_pipeline mandelbrot_pipeline.cpp
+ * Compilación:
+ * g++ -O2 -std=c++17 -fopenmp -o mandelbrot_pipeline mandelbrot_pipeline.cpp
  *
- *  Ejecución (estimado ~5–20 min en CPU moderna):
- *    ./mandelbrot_pipeline
+ * Ejecución:
+ * ./mandelbrot
  * ============================================================
  */
 
@@ -36,6 +36,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <omp.h> // Agregado para OpenMP
 
 // ──────────────────────────────────────────────────────────────
 //  Constantes de configuración
@@ -119,8 +120,7 @@ static RGB palette(double t) {
     t = t - std::floor(t);   // cíclico
 
     int i = 0;
-    while (i + 1 < static_cast<int>(stops.size()) - 1 &&
-           t > stops[i + 1].pos) ++i;
+    while (i + 1 < static_cast<int>(stops.size()) - 1 && t > stops[i + 1].pos) ++i;
 
     const Stop& a = stops[i];
     const Stop& b = stops[i + 1];
@@ -159,14 +159,18 @@ static Image task_a_mandelbrot() {
     // Barra de progreso simple (por filas)
     int progress_step = HEIGHT / 20;
 
+    #pragma omp parallel for
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
-            int pct = py * 100 / HEIGHT;
-            std::cout << "\r  Progreso: [";
-            int filled = pct / 5;
-            for (int k = 0; k < 20; ++k)
-                std::cout << (k < filled ? "#" : "-");
-            std::cout << "] " << std::setw(3) << pct << "%  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            #pragma omp critical
+            {
+                int pct = py * 100 / HEIGHT;
+                std::cout << "\r  Progreso: [";
+                int filled = pct / 5;
+                for (int k = 0; k < 20; ++k)
+                    std::cout << (k < filled ? "#" : "-");
+                std::cout << "] " << std::setw(3) << pct << "%  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            }
         }
 
         const double cy = Y_MIN + (py + 0.5) * dy;
@@ -250,9 +254,13 @@ static Image task_b1_gaussian(const Image& src) {
 
     // ── Pasada horizontal ──────────────────────────────────────
     std::cout << "  Pasada horizontal...\n";
+    #pragma omp parallel for
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
-            std::cout << "\r    Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            #pragma omp critical
+            {
+                std::cout << "\r    Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            }
         }
         for (int px = 0; px < WIDTH; ++px) {
             double sr = 0, sg = 0, sb = 0;
@@ -276,9 +284,13 @@ static Image task_b1_gaussian(const Image& src) {
     // ── Pasada vertical ───────────────────────────────────────
     std::cout << "  Pasada vertical...\n";
     Image out(WIDTH * HEIGHT);
+    #pragma omp parallel for
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
-            std::cout << "\r    Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            #pragma omp critical
+            {
+                std::cout << "\r    Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            }
         }
         for (int px = 0; px < WIDTH; ++px) {
             double sr = 0, sg = 0, sb = 0;
@@ -324,6 +336,7 @@ static void task_b2_sobel(const Image& src) {
 
     // Convertir a luminancia (escala de grises)
     std::vector<float> gray(WIDTH * HEIGHT);
+    #pragma omp parallel for
     for (int i = 0; i < WIDTH * HEIGHT; ++i) {
         const RGB& p = src[i];
         gray[i] = 0.299f * p.r + 0.587f * p.g + 0.114f * p.b;
@@ -336,9 +349,13 @@ static void task_b2_sobel(const Image& src) {
     std::vector<float> mag(WIDTH * HEIGHT, 0.0f);
     int progress_step = HEIGHT / 20;
 
+    #pragma omp parallel for reduction(max:max_mag)
     for (int py = 1; py < HEIGHT - 1; ++py) {
         if (py % progress_step == 0) {
-            std::cout << "\r  Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            #pragma omp critical
+            {
+                std::cout << "\r  Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
+            }
         }
         for (int px = 1; px < WIDTH - 1; ++px) {
             // Vecinos (acceso a grilla 3×3)
@@ -363,6 +380,7 @@ static void task_b2_sobel(const Image& src) {
 
     // Segunda pasada: normalizar y colorear
     float inv_max = (max_mag > 0.0f) ? (255.0f / max_mag) : 1.0f;
+    #pragma omp parallel for
     for (int i = 0; i < WIDTH * HEIGHT; ++i) {
         auto v = static_cast<uint8_t>(std::clamp(mag[i] * inv_max, 0.0f, 255.0f));
         out[i] = {v, v, v};
@@ -381,7 +399,7 @@ static void task_b2_sobel(const Image& src) {
 
 int main() {
     std::cout << "═══════════════════════════════════════════════════\n";
-    std::cout << "  Pipeline Secuencial: Mandelbrot 8K + Convolución\n";
+    std::cout << "  Pipeline Paralelo: Mandelbrot 8K + Convolución\n";
     std::cout << "═══════════════════════════════════════════════════\n";
     std::cout << "  Resolución  : " << WIDTH << " × " << HEIGHT << " px\n";
     std::cout << "  Max iter    : " << MAX_ITER << "\n";
