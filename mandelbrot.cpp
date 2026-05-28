@@ -328,7 +328,7 @@ static Image task_b1_gaussian(const Image& src) {
 //  y produce una imagen de magnitud de gradiente normalizada.
 // ──────────────────────────────────────────────────────────────
 
-static void task_b2_sobel(const Image& src) {
+static Image task_b2_sobel(const Image& src) {
     std::cout << "\n╔════════════════════════════════════╗\n";
     std::cout <<   "║  TAREA B-2 — Filtro Sobel 3×3      ║\n";
     std::cout <<   "╚════════════════════════════════════╝\n";
@@ -401,6 +401,44 @@ static void task_b2_sobel(const Image& src) {
     std::cout << "  Tiempo Tarea B-2: " << elapsed_s(t0) << " s\n";
 
     save_ppm("mandelbrot_sobel.ppm", out, WIDTH, HEIGHT);
+    return out;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  TAREA C: Histograma de colores y Sincronización
+// ──────────────────────────────────────────────────────────────
+
+static void task_c_histogram(const Image& img) {
+    std::cout << "\n╔══════════════════════════════════════════════╗\n";
+    std::cout <<   "║  TAREA C — Histograma de Colores (256 bins)  ║\n";
+    std::cout <<   "╚══════════════════════════════════════════════╝\n";
+
+    TimePoint t0 = now();
+    
+    // Arreglo para contar cuántos píxeles hay de cada valor de gris (0-255)
+    int hist[256] = {0};
+
+    // VERSIÓN: atomic - propenso a false sharing
+
+    std::cout << "  Calculando histograma usando: #pragma omp atomic\n";
+    #pragma omp parallel for
+    for (int i = 0; i < WIDTH * HEIGHT; ++i) {
+        uint8_t color = img[i].r; // En la imagen Sobel los canales r, g y b son iguales
+        
+        #pragma omp atomic
+        hist[color]++;
+    }
+
+    double elapsed = elapsed_s(t0);
+    
+    // Imprimir un fragmento del resultado para verificar que cuente bien
+    std::cout << "  Muestra del histograma (Color 0 a 255):\n";
+    for(int i = 0; i < 256; i++) {
+        std::cout << "    Gris " << std::setw(3) << i << ": " << hist[i] << " px\n";
+    }
+
+    std::cout << "  ----------------------------------------------\n";
+    std::cout << "  Tiempo Tarea C (Histograma): " << std::fixed << std::setprecision(4) << elapsed << " s\n";
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -424,7 +462,10 @@ int main() {
     Image blurred = task_b1_gaussian(mandelbrot);
 
     // ── Tarea B-2 ─────────────────────────────────────────────
-    task_b2_sobel(blurred);
+    Image sobel = task_b2_sobel(blurred);
+
+    // ── Tarea C ───────────────────────────────────────────────
+    task_c_histogram(sobel);
 
     // ── Resumen ───────────────────────────────────────────────
     std::cout << "\n╔════════════════════════════════════════════════╗\n";
