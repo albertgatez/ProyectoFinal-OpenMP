@@ -18,7 +18,7 @@
  *    mandelbrot_sobel.ppm       ← Sobel aplicado (Tarea B-2)
  *
  * Compilación:
- * g++ -O2 -std=c++17 -fopenmp -o mandelbrot_pipeline mandelbrot_pipeline.cpp
+ * g++-15 -O3 -std=c++17 -fopenmp -fopt-info-vec-optimized mandelbrot.cpp -o mandelbrot
  *
  * Ejecución:
  * ./mandelbrot
@@ -231,7 +231,7 @@ static Image task_a_mandelbrot() {
 
 static Image task_b1_gaussian(const Image& src) {
     std::cout << "\n╔═══════════════════════════════════════════════╗\n";
-    std::cout <<   "║  TAREA B-1 — Filtro Gaussiano (R=" << GAUSS_RADIUS << ", σ=" << GAUSS_SIGMA << ")  ║\n";
+    std::cout <<   "║  TAREA B-1 — Filtro Gaussiano (SPMD / SIMD)   ║\n";
     std::cout <<   "╚═══════════════════════════════════════════════╝\n";
 
     TimePoint t0 = now();
@@ -254,11 +254,11 @@ static Image task_b1_gaussian(const Image& src) {
 
     int progress_step = HEIGHT / 20;
 
-    // ── Pasada horizontal ──────────────────────────────────────
-    std::cout << "  Pasada horizontal...\n";
+    // ── 1. PASADA HORIZONTAL VECTORIZADA ───────────────────────
+    std::cout << "  Pasada horizontal (SIMD)...\n";
     #pragma omp parallel for schedule(static)
     // #pragma omp parallel for schedule(dynamic, 100)
-    // #pragma omp parallel for schedule(guided, 100)
+    // #pragma omp parallel for schedule(guided, 100)    
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
             #pragma omp critical
@@ -267,26 +267,31 @@ static Image task_b1_gaussian(const Image& src) {
             }
         }
         for (int px = 0; px < WIDTH; ++px) {
-            double sr = 0, sg = 0, sb = 0;
-            for (int k = -K; k <= K; ++k) {
-                int qx = std::clamp(px + k, 0, WIDTH - 1);
-                const RGB& p = src[py * WIDTH + qx];
-                double w = kernel[k + K];
-                sr += w * p.r;
-                sg += w * p.g;
-                sb += w * p.b;
+            tmp[py * WIDTH + px] = {0.0f, 0.0f, 0.0f};
+        }
+
+        // El bucle del kernel queda afuera...
+        for (int k = -K; k <= K; ++k) {
+            double w = kernel[k + K];
+            
+            // Y el bucle de los píxeles queda adentro listo para vectorizar
+            #pragma omp simd
+            for (int px = 0; px < WIDTH; ++px) {
+                // Eliminamos std::clamp interno calculando los índices de forma directa
+                int qx = px + k;
+                if (qx < 0) qx = 0;
+                if (qx >= WIDTH) qx = WIDTH - 1;
+
+                tmp[py * WIDTH + px][0] += static_cast<float>(w * src[py * WIDTH + qx].r);
+                tmp[py * WIDTH + px][1] += static_cast<float>(w * src[py * WIDTH + qx].g);
+                tmp[py * WIDTH + px][2] += static_cast<float>(w * src[py * WIDTH + qx].b);
             }
-            tmp[py * WIDTH + px] = {
-                static_cast<float>(sr),
-                static_cast<float>(sg),
-                static_cast<float>(sb)
-            };
         }
     }
     std::cout << "\r    Pasada horizontal completada.                \n";
 
-    // ── Pasada vertical ───────────────────────────────────────
-    std::cout << "  Pasada vertical...\n";
+    // ── 2. PASADA VERTICAL VECTORIZADA ─────────────────────────
+    std::cout << "  Pasada vertical (SIMD)...\n";
     Image out(WIDTH * HEIGHT);
     #pragma omp parallel for schedule(static)
     // #pragma omp parallel for schedule(dynamic, 100)
@@ -298,20 +303,33 @@ static Image task_b1_gaussian(const Image& src) {
                 std::cout << "\r    Fila " << std::setw(5) << py << "/" << HEIGHT << "  " << std::fixed << std::setprecision(1) << elapsed_s(t0) << "s" << std::flush;
             }
         }
-        for (int px = 0; px < WIDTH; ++px) {
-            double sr = 0, sg = 0, sb = 0;
-            for (int k = -K; k <= K; ++k) {
-                int qy = std::clamp(py + k, 0, HEIGHT - 1);
-                const auto& p = tmp[qy * WIDTH + px];
-                double w = kernel[k + K];
-                sr += w * p[0];
-                sg += w * p[1];
-                sb += w * p[2];
+
+        // Para poder mover el bucle 'px' al fondo, necesitamos acumuladores locales por fila
+        std::vector<float> acc_r(WIDTH, 0.0f);
+        std::vector<float> acc_g(WIDTH, 0.0f);
+        std::vector<float> acc_b(WIDTH, 0.0f);
+
+        for (int k = -K; k <= K; ++k) {
+            int qy = py + k;
+            if (qy < 0) qy = 0;
+            if (qy >= HEIGHT) qy = HEIGHT - 1;
+            
+            double w = kernel[k + K];
+
+            #pragma omp simd
+            for (int px = 0; px < WIDTH; ++px) {
+                acc_r[px] += static_cast<float>(w * tmp[qy * WIDTH + px][0]);
+                acc_g[px] += static_cast<float>(w * tmp[qy * WIDTH + px][1]);
+                acc_b[px] += static_cast<float>(w * tmp[qy * WIDTH + px][2]);
             }
+        }
+
+        // Vaciamos el acumulador en la imagen final de salida
+        for (int px = 0; px < WIDTH; ++px) {
             out[py * WIDTH + px] = {
-                static_cast<uint8_t>(std::clamp(sr, 0.0, 255.0)),
-                static_cast<uint8_t>(std::clamp(sg, 0.0, 255.0)),
-                static_cast<uint8_t>(std::clamp(sb, 0.0, 255.0))
+                static_cast<uint8_t>(std::clamp(acc_r[px], 0.0f, 255.0f)),
+                static_cast<uint8_t>(std::clamp(acc_g[px], 0.0f, 255.0f)),
+                static_cast<uint8_t>(std::clamp(acc_b[px], 0.0f, 255.0f))
             };
         }
     }
