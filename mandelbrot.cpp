@@ -418,16 +418,36 @@ static void task_c_histogram(const Image& img) {
     // Arreglo para contar cuántos píxeles hay de cada valor de gris (0-255)
     int hist[256] = {0};
 
-    // VERSIÓN: atomic - propenso a false sharing
-
-    std::cout << "  Calculando histograma usando: #pragma omp atomic\n";
-    #pragma omp parallel for
-    for (int i = 0; i < WIDTH * HEIGHT; ++i) {
-        uint8_t color = img[i].r; // En la imagen Sobel los canales r, g y b son iguales
+    // ==============================
+    // VERSIÓN 1: atomic - propenso a false sharing
+    
+    // **DESMARCAR**
+    // std::cout << "  Calculando histograma usando: #pragma omp atomic\n";
+    // #pragma omp parallel for
+    // for (int i = 0; i < WIDTH * HEIGHT; ++i) {
+    //     uint8_t color = img[i].r; // En la imagen Sobel los canales r, g y b son iguales
         
-        #pragma omp atomic
+    //     #pragma omp atomic
+    //     hist[color]++;
+    // }
+    
+    // **DESMARCAR**
+
+    // ==============================
+    // VERSIÓN 2: reduction
+
+    // **COMENTAR** esta sección entera cuando se desmarque la Versión 1
+    
+    std::cout << "  Calculando histograma usando: reduction(+:hist[:256])\n";
+    // reduction(+:hist[:256]) le da a cada hilo un arreglo local lleno de 0s
+    // Al final, OpenMP suma todos los arreglos locales al arreglo original
+    #pragma omp parallel for reduction(+:hist[:256])
+    for (int i = 0; i < WIDTH * HEIGHT; ++i) {
+        uint8_t color = img[i].r; // Solo es necesario conocer uno de los valores RGB
         hist[color]++;
     }
+    
+    // **FIN DE SECCIÓN A COMENTAR**
 
     double elapsed = elapsed_s(t0);
     
