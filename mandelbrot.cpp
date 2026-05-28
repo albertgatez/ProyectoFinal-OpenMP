@@ -147,7 +147,7 @@ static RGB palette(double t) {
 
 static Image task_a_mandelbrot() {
     std::cout << "\n╔══════════════════════════════════════════╗\n";
-    std::cout <<   "║  TAREA A — Mandelbrot 8K (" << WIDTH << "×" << HEIGHT << ")  ║\n";
+    std::cout <<   "║  TAREA A — Mandelbrot 8K (" << WIDTH << "×" << HEIGHT << ")     ║\n";
     std::cout <<   "╚══════════════════════════════════════════╝\n";
 
     Image img(WIDTH * HEIGHT);
@@ -159,7 +159,9 @@ static Image task_a_mandelbrot() {
     // Barra de progreso simple (por filas)
     int progress_step = HEIGHT / 20;
 
-    #pragma omp parallel for
+    // #pragma omp parallel for schedule(static)
+    #pragma omp parallel for schedule(dynamic, 10)
+    // #pragma omp parallel for schedule(guided, 100)
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
             #pragma omp critical
@@ -254,7 +256,9 @@ static Image task_b1_gaussian(const Image& src) {
 
     // ── Pasada horizontal ──────────────────────────────────────
     std::cout << "  Pasada horizontal...\n";
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
+    // #pragma omp parallel for schedule(dynamic, 100)
+    // #pragma omp parallel for schedule(guided, 100)
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
             #pragma omp critical
@@ -284,7 +288,9 @@ static Image task_b1_gaussian(const Image& src) {
     // ── Pasada vertical ───────────────────────────────────────
     std::cout << "  Pasada vertical...\n";
     Image out(WIDTH * HEIGHT);
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
+    // #pragma omp parallel for schedule(dynamic, 100)
+    // #pragma omp parallel for schedule(guided, 100)
     for (int py = 0; py < HEIGHT; ++py) {
         if (py % progress_step == 0) {
             #pragma omp critical
@@ -336,7 +342,9 @@ static void task_b2_sobel(const Image& src) {
 
     // Convertir a luminancia (escala de grises)
     std::vector<float> gray(WIDTH * HEIGHT);
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
+    // #pragma omp parallel for schedule(dynamic, 100)
+    // #pragma omp parallel for schedule(guided, 100)
     for (int i = 0; i < WIDTH * HEIGHT; ++i) {
         const RGB& p = src[i];
         gray[i] = 0.299f * p.r + 0.587f * p.g + 0.114f * p.b;
@@ -380,7 +388,9 @@ static void task_b2_sobel(const Image& src) {
 
     // Segunda pasada: normalizar y colorear
     float inv_max = (max_mag > 0.0f) ? (255.0f / max_mag) : 1.0f;
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(static)
+    // #pragma omp parallel for schedule(dynamic, 100)
+    // #pragma omp parallel for schedule(guided, 100)
     for (int i = 0; i < WIDTH * HEIGHT; ++i) {
         auto v = static_cast<uint8_t>(std::clamp(mag[i] * inv_max, 0.0f, 255.0f));
         out[i] = {v, v, v};
